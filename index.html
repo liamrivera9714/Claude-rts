@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+</head>
+<body>
+<title>烽火急令</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<style>
+/* 布局：一屏应用。顶部一行军情，中间战场占满剩余空间，底部一条军令栏。沿用《烽火疆域》的沙盘深色主题。 */
+:root {
+  color-scheme: dark;
+  --bg: #111e1d;
+  --surface: #19292a;
+  --surface-2: #213536;
+  --line: #2f4a49;
+  --fg: #e7ede3;
+  --muted: #92a6a0;
+  --brass: #e0b548;
+  --danger: #e8604a;
+  --font-display: "ZCOOL XiaoWei", "Songti SC", "STSong", "SimSun", serif;
+  --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  padding-block: 8px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  overscroll-behavior: none;
+}
+.app { height: 100%; max-width: 1400px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+h1 { font-family: var(--font-display); font-weight: 400; font-size: 24px; letter-spacing: .12em; margin: 0; color: var(--brass); line-height: 1.1; }
+.stats { display: flex; gap: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.stats b { color: var(--fg); font-size: 16px; }
+.top .right { margin-left: auto; display: flex; gap: 6px; }
+button, select { font: inherit; color: var(--fg); background: var(--surface-2); border: 1px solid var(--line); border-radius: 5px; padding: 7px 10px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--brass); }
+button:focus-visible, select:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+button:disabled { opacity: .42; cursor: not-allowed; }
+button.small { padding: 2px 10px; font-size: 12px; border-radius: 999px; color: var(--muted); }
+.primary { background: var(--brass); border-color: var(--brass); color: #1b1608; font-weight: 700; }
+
+.field { position: relative; flex: 1; min-height: 0; border-radius: 6px; overflow: hidden; background: #0c1616; }
+canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+.toast { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); background: rgba(12, 22, 22, .9); border: 1px solid var(--danger); color: var(--fg); padding: 4px 12px; border-radius: 999px; font-size: 13px; pointer-events: none; white-space: nowrap; }
+.overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(10, 18, 18, .8); padding: 12px; overflow: auto; }
+.card { max-width: 420px; width: 100%; display: flex; flex-direction: column; gap: 10px; text-align: left; }
+.card h2 { font-family: var(--font-display); font-weight: 400; font-size: 40px; letter-spacing: .18em; margin: 0; color: var(--brass); text-align: center; text-wrap: balance; }
+.card.lose h2 { color: var(--danger); }
+.card p { margin: 0; text-align: center; }
+.card ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+.card li + li { margin-top: 3px; }
+.card .row { display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap; }
+.card label { color: var(--muted); font-size: 13px; display: flex; gap: 6px; align-items: center; }
+
+.bar { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 6px; min-height: 96px; }
+.bar .desc { color: var(--muted); font-size: 13px; min-width: 0; }
+.bar .desc b { color: var(--fg); font-weight: 700; }
+.btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.btns button { line-height: 1.25; padding: 5px 9px; text-align: left; }
+.btns button em { font-style: normal; color: var(--brass); margin-left: 6px; font-variant-numeric: tabular-nums; }
+.btns button kbd { font: inherit; font-size: 11px; color: var(--muted); margin-right: 5px; }
+.btns .quick { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+@media (max-width: 600px) { h1 { font-size: 20px; } .btns button kbd { display: none; } }
+</style>
+
+<div class="app">
+  <header class="top">
+    <h1>烽火急令</h1>
+    <div class="stats">
+      <span>金 <b id="sGold">0</b></span>
+      <span>人口 <b id="sPop">0/0</b></span>
+      <span>用时 <b id="sTime">0:00</b></span>
+    </div>
+    <div class="right">
+      <button id="pause" type="button" class="small">暂停</button>
+      <button id="mute" type="button" class="small">音效：开</button>
+    </div>
+  </header>
+
+  <div class="field" id="field">
+    <canvas id="cv" aria-label="即时战略战场"></canvas>
+    <div class="toast" id="toast" hidden></div>
+    <div class="overlay" id="startOv">
+      <div class="card">
+        <h2>烽火急令</h2>
+        <p>采金、筑城、练兵，抢在敌军之前攻破对方都城。</p>
+        <ul>
+          <li>点选或拖框选中单位，再点地面移动、点敌人进攻、点金矿采集。电脑上右键同样可以下令。</li>
+          <li>选中民夫可以建造；选中都城训练民夫，选中兵营训练军队。</li>
+          <li>民居提高人口上限，箭塔自动射击，驿站让民夫就近交金。</li>
+          <li>步兵克骑兵，骑兵克弓兵，弓兵克步兵，克制时伤害加半。</li>
+          <li>蓝方是你，红方是电脑。都城被毁的一方落败。</li>
+        </ul>
+        <div class="row">
+          <label for="diff">难度
+            <select id="diff"><option value="0">简单</option><option value="1" selected>普通</option><option value="2">困难</option></select>
+          </label>
+          <button id="startBtn" class="primary" type="button">开战</button>
+        </div>
+      </div>
+    </div>
+    <div class="overlay" id="endOv" hidden>
+      <div class="card" id="endCard">
+        <h2 id="endTitle"></h2>
+        <p id="endText"></p>
+        <div class="row"><button id="againBtn" class="primary" type="button">再来一局</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bar" id="bar">
+    <div class="desc" id="desc"></div>
+    <div class="btns" id="btns"></div>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+const UT = {
+  wrk: { n: '民夫', ch: '民', cost: 50,  hp: 40,  dmg: 3,  cd: 1.0, rng: 0.75, spd: 2.3, train: 9 },
+  inf: { n: '步兵', ch: '步', cost: 60,  hp: 100, dmg: 10, cd: 1.0, rng: 0.75, spd: 2.1, train: 10 },
+  arc: { n: '弓兵', ch: '弓', cost: 75,  hp: 55,  dmg: 9,  cd: 1.2, rng: 4.0,  spd: 2.1, train: 11 },
+  cav: { n: '骑兵', ch: '骑', cost: 110, hp: 130, dmg: 13, cd: 1.1, rng: 0.8,  spd: 3.3, train: 13 },
+};
+const BT = {
+  hq:  { n: '都城', ch: '都', w: 2, h: 2, hp: 2500, cost: 0,   build: 1,  pop: 8, dmg: 7, rng: 4.5, cd: 1, tip: '训练民夫，接收金子，每 3 秒自带 2 金税收。被毁即落败' },
+  hse: { n: '民居', ch: '居', w: 1, h: 1, hp: 300,  cost: 60,  build: 12, pop: 6, tip: '人口上限 +6' },
+  bar: { n: '兵营', ch: '营', w: 2, h: 2, hp: 650,  cost: 150, build: 22, tip: '训练步兵、弓兵、骑兵' },
+  twr: { n: '箭塔', ch: '塔', w: 1, h: 1, hp: 420,  cost: 120, build: 18, dmg: 12, rng: 5, cd: 1, tip: '自动射击靠近的敌军' },
+  dep: { n: '驿站', ch: '驿', w: 1, h: 1, hp: 350,  cost: 90,  build: 12, tip: '民夫可以就近交金' },
+};
+const COUNTER = { inf: 'cav', cav: 'arc', arc: 'inf' };
+const POPMAX = 40;
+const COLORS = ['#4f9dff', '#e8604a'];
+const DIFFS = [
+  { rate: 0.7, workers: 6,  bars: 1, towers: 0, first: 300, wave0: 4, grow: 2 },
+  { rate: 1.0, workers: 10, bars: 2, towers: 1, first: 180, wave0: 5, grow: 2 },
+  { rate: 1.3, workers: 13, bars: 3, towers: 2, first: 100, wave0: 5, grow: 2 },
+];
+const DX = [1, -1, 0, 0, 1, 1, -1, -1], DY = [0, 0, 1, -1, 1, -1, 1, -1];
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d'), tcv = document.createElement('canvas');
+
+let G = null, FAST = false, paused = false;
+let selU = new Set(), selB = 0, placing = null, hoverW = null, box = null, pings = [];
+let ts = 20, ox = 0, oy = 0, terrDirty = true, barSig = '', toastT = 0, lastAlertSfx = -99;
+
+/* ---------- 音效 ---------- */
+let actx = null, muted = false;
+try { muted = localStorage.getItem('jiling-mute') === '1'; } catch (e) { /* 忽略 */ }
+function tone(f, d, type = 'triangle', v = 0.06, when = 0, slide = 0) {
+  if (muted || FAST) return;
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') actx.resume();
+    const t = actx.currentTime + when, o = actx.createOscillator(), g = actx.createGain();
+    o.type = type; o.frequency.setValueAtTime(f, t);
+    if (slide) o.frequency.exponentialRampToValueAtTime(slide, t + d);
+    g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.001, t + d);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + d + 0.02);
+  } catch (e) { /* 没有声音也能玩 */ }
+}
+const sfx = {
+  order: () => tone(560, 0.05, 'sine', 0.04),
+  pick: () => tone(740, 0.04, 'sine', 0.03),
+  err: () => tone(160, 0.14, 'square', 0.05),
+  ready: () => { tone(660, 0.08); tone(880, 0.12, 'triangle', 0.06, 0.08); },
+  built: () => { tone(523, 0.09); tone(659, 0.09, 'triangle', 0.06, 0.09); tone(784, 0.16, 'triangle', 0.06, 0.18); },
+  alert: () => { tone(880, 0.12, 'square', 0.05); tone(660, 0.16, 'square', 0.05, 0.14); },
+  boom: () => tone(120, 0.4, 'sawtooth', 0.08, 0, 40),
+  win: () => [523, 659, 784, 1047].forEach((f, k) => tone(f, 0.25, 'triangle', 0.08, k * 0.14)),
+  lose: () => [392, 330, 262, 196].forEach((f, k) => tone(f, 0.3, 'triangle', 0.08, k * 0.18)),
+};
+
+/* ---------- 地图与开局 ---------- */
+const mirror = (x, y, w = 1, h = 1) => [G.W - x - w, G.H - y - h];
+function newGame(diff, portrait) {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const W = portrait ? 16 : 34, H = portrait ? 28 : 20;
+    G = { W, H, terr: new Uint8Array(W * H), block: new Uint8Array(W * H), units: [], blds: [], mines: [], ents: new Map(),
+      nextId: 1, time: 0, over: null, running: false, tracers: [], diff, aiT: 0, taxT: 3,
+      players: [{ gold: 150, rate: 1, alert: null, ai: null }, { gold: 150, rate: DIFFS[diff].rate, alert: null, ai: { waves: 0, attacking: false, cfg: DIFFS[diff] } }] };
+    const set = (x, y, v) => { if (x >= 0 && y >= 0 && x < W && y < H) { G.terr[y * W + x] = v; const [mx, my] = mirror(x, y); G.terr[my * W + mx] = v; } };
+    for (let b = 0, nb = Math.round(W * H / 42); b < nb; b++) {
+      let x = (Math.random() * W) | 0, y = (Math.random() * H) | 0;
+      const r = Math.random(), v = r < 0.55 ? 1 : r < 0.8 ? 2 : 3, len = 4 + ((Math.random() * 7) | 0);
+      for (let k = 0; k < len; k++) { set(x, y, v); const d = (Math.random() * 4) | 0; x += DX[d]; y += DY[d]; }
+    }
+    const hq = [3, H - 5];
+    const minesAt = [[7, H - 6, 1800], [Math.round(W * 0.3), Math.round(H * 0.55), 1500], [Math.round(W * 0.42), Math.round(H * 0.25), 2500]];
+    for (let dy = -4; dy <= 5; dy++) for (let dx = -4; dx <= 5; dx++) set(hq[0] + dx, hq[1] + dy, 0);
+    for (const [mx, my] of minesAt) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) set(mx + dx, my + dy, 0);
+    for (const [mx, my, gold] of minesAt) for (const [x, y] of [[mx, my], mirror(mx, my)]) {
+      const m = { k: 'm', id: G.nextId++, x, y, w: 1, h: 1, gold, max: gold };
+      G.mines.push(m); G.ents.set(m.id, m);
+    }
+    addBld(0, 'hq', hq[0], hq[1], true);
+    addBld(1, 'hq', ...mirror(hq[0], hq[1], 2, 2), true);
+    // 连通性：从己方都城旁出发，必须能走到敌方都城和每座金矿旁边
+    const seen = new Uint8Array(W * H), q = [(hq[1] - 1) * W + hq[0]]; seen[q[0]] = 1;
+    while (q.length) { const c = q.pop(), cx = c % W, cy = (c / W) | 0; for (let d = 0; d < 4; d++) { const nx = cx + DX[d], ny = cy + DY[d]; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const n = ny * W + nx; if (!seen[n] && !G.block[n]) { seen[n] = 1; q.push(n); } } }
+    const near = r => { for (let y = r.y - 1; y <= r.y + r.h; y++) for (let x = r.x - 1; x <= r.x + r.w; x++) if (x >= 0 && y >= 0 && x < W && y < H && seen[y * W + x]) return true; return false; };
+    if (!G.mines.every(near) || !G.blds.every(near)) continue;
+    for (const b of G.blds) for (let k = 0; k < 4; k++) {
+      const s = spotNear(b); const u = addUnit(b.owner, 'wrk', s[0] + 0.5, s[1] + 0.5); autoGather(u);
+    }
+    break;
+  }
+  selU = new Set(); selB = 0; placing = null; box = null; pings = []; paused = false; terrDirty = true; barSig = '';
+}
+function rebuildBlock() {
+  const { W, H } = G;
+  for (let i = 0; i < W * H; i++) G.block[i] = G.terr[i] ? 1 : 0;
+  for (const r of G.mines.concat(G.blds)) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) G.block[y * W + x] = 2;
+}
+function addUnit(owner, type, x, y) {
+  const u = { k: 'u', id: G.nextId++, owner, type, x, y, hp: UT[type].hp, st: 'idle', path: null, dest: null, cd: 0, rp: 0, acq: Math.random() * 0.3, carry: 0, timer: 0, tid: 0, mid: 0, did: 0, bid: 0, amove: false, resume: null, hitT: -9 };
+  G.units.push(u); G.ents.set(u.id, u); return u;
+}
+function addBld(owner, type, x, y, done) {
+  const T = BT[type];
+  const b = { k: 'b', id: G.nextId++, owner, type, x, y, w: T.w, h: T.h, hp: done ? T.hp : T.hp * 0.1, done, prog: 0, queue: [], cd: 0, hitT: -9 };
+  G.blds.push(b); G.ents.set(b.id, b); rebuildBlock(); return b;
+}
+function kill(e) {
+  G.ents.delete(e.id);
+  if (e.k === 'u') { G.units.splice(G.units.indexOf(e), 1); selU.delete(e.id); }
+  else {
+    G.blds.splice(G.blds.indexOf(e), 1); rebuildBlock(); if (selB === e.id) selB = 0; sfx.boom();
+    if (e.type === 'hq' && !G.over) { G.over = e.owner === 0 ? 'lose' : 'win'; G.running = false; (G.over === 'win' ? sfx.win : sfx.lose)(); showEnd(); }
+  }
+}
+
+/* ---------- 寻路 ---------- */
+function findPath(sx, sy, goal, hx, hy) {
+  const W = G.W, H = G.H, n = W * H, g = new Float32Array(n).fill(1e9), prev = new Int32Array(n).fill(-1), closed = new Uint8Array(n);
+  const s = sy * W + sx, open = [s]; g[s] = 0; let best = s, bestH = 1e9;
+  while (open.length) {
+    let bi = 0, bf = 1e9;
+    for (let k = 0; k < open.length; k++) { const i = open[k], f = g[i] + Math.hypot(i % W - hx, ((i / W) | 0) - hy); if (f < bf) { bf = f; bi = k; } }
+    const cur = open[bi]; open[bi] = open[open.length - 1]; open.pop();
+    if (closed[cur]) continue; closed[cur] = 1;
+    const cx = cur % W, cy = (cur / W) | 0, h = Math.hypot(cx - hx, cy - hy);
+    if (h < bestH) { bestH = h; best = cur; }
+    if (goal(cx, cy)) { best = cur; break; }
+    for (let d = 0; d < 8; d++) {
+      const nx = cx + DX[d], ny = cy + DY[d];
+      if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+      const ni = ny * W + nx;
+      if (G.block[ni] || closed[ni]) continue;
+      if (d >= 4 && (G.block[cy * W + nx] || G.block[ny * W + cx])) continue;
+      const ng = g[cur] + (d >= 4 ? 1.414 : 1);
+      if (ng < g[ni]) { g[ni] = ng; prev[ni] = cur; open.push(ni); }
+    }
+  }
+  const path = [];
+  for (let c = best; c !== s && c >= 0; c = prev[c]) path.unshift([c % W + 0.5, ((c / W) | 0) + 0.5]);
+  return path;
+}
+const clampT = (v, m) => Math.max(0, Math.min(m - 1, v | 0));
+function nearestPassable(tx, ty) {
+  tx = clampT(tx, G.W); ty = clampT(ty, G.H);
+  for (let r = 0; r < 12; r++) for (let y = ty - r; y <= ty + r; y++) for (let x = tx - r; x <= tx + r; x++) {
+    if (Math.max(Math.abs(x - tx), Math.abs(y - ty)) !== r || x < 0 || y < 0 || x >= G.W || y >= G.H) continue;
+    if (!G.block[y * G.W + x]) return [x, y];
+  }
+  return [tx, ty];
+}
+function pathPoint(u, x, y) {
+  const [tx, ty] = nearestPassable(x, y);
+  const p = findPath(clampT(u.x, G.W), clampT(u.y, G.H), (a, b) => a === tx && b === ty, tx, ty);
+  if (p.length && tx === (x | 0) && ty === (y | 0)) p[p.length - 1] = [x, y];
+  return p;
+}
+function pathRect(u, r) {
+  return findPath(clampT(u.x, G.W), clampT(u.y, G.H), (x, y) => x >= r.x - 1 && x <= r.x + r.w && y >= r.y - 1 && y <= r.y + r.h, r.x + r.w / 2 - 0.5, r.y + r.h / 2 - 0.5);
+}
+const rdist = (u, r) => Math.hypot(Math.max(r.x - u.x, 0, u.x - r.x - r.w), Math.max(r.y - u.y, 0, u.y - r.y - r.h));
+function spotNear(r) {
+  const taken = new Set(G.units.map(u => (u.y | 0) * G.W + (u.x | 0)));
+  let fallback = null;
+  for (let d = 1; d < 6; d++) for (let y = r.y - d; y < r.y + r.h + d; y++) for (let x = r.x - d; x < r.x + r.w + d; x++) {
+    if (x < 0 || y < 0 || x >= G.W || y >= G.H || G.block[y * G.W + x]) continue;
+    if (x > r.x - d && x < r.x + r.w + d - 1 && y > r.y - d && y < r.y + r.h + d - 1) continue;
+    if (!taken.has(y * G.W + x)) return [x, y];
+    fallback = fallback || [x, y];
+  }
+  return fallback || nearestPassable(r.x, r.y);
+}
+
+/* ---------- 命令 ---------- */
+function oMove(u, x, y, amove) { u.st = 'move'; u.dest = { x, y }; u.path = null; u.amove = !!amove; u.resume = null; u.tid = 0; }
+function oAttack(u, t) { u.st = 'attack'; u.tid = t.id; u.path = null; u.rp = 0; u.resume = null; }
+function oGather(u, m) { u.st = u.carry ? 'return' : 'gather'; u.mid = m.id; u.path = null; u.rp = 0; u.timer = 0; if (u.carry) { const d = nearestDrop(u); u.did = d ? d.id : 0; } }
+function oBuild(u, b) { u.st = 'build'; u.bid = b.id; u.path = null; u.rp = 0; }
+function nearestMine(x, y, maxD) {
+  let best = null, bd = maxD;
+  for (const m of G.mines) if (m.gold > 0) { const d = Math.hypot(m.x + 0.5 - x, m.y + 0.5 - y); if (d < bd) { bd = d; best = m; } }
+  return best;
+}
+function nearestDrop(u) {
+  let best = null, bd = 1e9;
+  for (const b of G.blds) if (b.owner === u.owner && b.done && (b.type === 'hq' || b.type === 'dep')) { const d = rdist(u, b); if (d < bd) { bd = d; best = b; } }
+  return best;
+}
+function autoGather(u) { const m = nearestMine(u.x, u.y, 18); if (m) oGather(u, m); else { u.st = 'idle'; u.path = null; } }
+function groupMove(units, x, y, amove) {
+  const [sx, sy] = nearestPassable(x, y), W = G.W, seen = new Set([sy * W + sx]), q = [[sx, sy]], spots = [];
+  for (let k = 0; k < q.length && spots.length < units.length; k++) {
+    const [cx, cy] = q[k]; spots.push([cx, cy]);
+    for (let d = 0; d < 4; d++) { const nx = cx + DX[d], ny = cy + DY[d]; if (nx < 0 || ny < 0 || nx >= W || ny >= G.H || G.block[ny * W + nx] || seen.has(ny * W + nx)) continue; seen.add(ny * W + nx); q.push([nx, ny]); }
+  }
+  units.forEach((u, k) => {
+    const s = spots[Math.min(k, spots.length - 1)];
+    if (k === 0 && sx === (x | 0) && sy === (y | 0)) oMove(u, x, y, amove && u.type !== 'wrk');
+    else oMove(u, s[0] + 0.5, s[1] + 0.5, amove && u.type !== 'wrk');
+  });
+}
+const popCap = p => Math.min(POPMAX, G.blds.reduce((s, b) => s + (b.owner === p && b.done ? BT[b.type].pop || 0 : 0), 0));
+const popUsed = p => G.units.reduce((s, u) => s + (u.owner === p ? 1 : 0), 0) + G.blds.reduce((s, b) => s + (b.owner === p ? b.queue.length : 0), 0);
+function train(p, b, type) {
+  const pl = G.players[p];
+  if (!b.done || b.queue.length >= 5) return '队列已满';
+  if (pl.gold < UT[type].cost) return '金子不够';
+  if (popUsed(p) >= popCap(p)) return popCap(p) >= POPMAX ? '人口已到上限' : '人口不足，先造民居';
+  pl.gold -= UT[type].cost; b.queue.push({ type, t: 0 }); return '';
+}
+function canPlace(type, x, y) {
+  const T = BT[type];
+  for (let yy = y; yy < y + T.h; yy++) for (let xx = x; xx < x + T.w; xx++) if (xx < 0 || yy < 0 || xx >= G.W || yy >= G.H || G.block[yy * G.W + xx]) return false;
+  return true;
+}
+function place(p, type, x, y) { G.players[p].gold -= BT[type].cost; return addBld(p, type, x, y, false); }
+
+/* ---------- 模拟 ---------- */
+function follow(u, dt) {
+  const p = u.path;
+  if (!p) return false;
+  if (!p.length) return true;
+  const [px, py] = p[0];
+  if (G.block[(py | 0) * G.W + (px | 0)]) { u.path = null; return false; }
+  const dx = px - u.x, dy = py - u.y, d = Math.hypot(dx, dy), st = UT[u.type].spd * dt;
+  if (d <= st) { u.x = px; u.y = py; p.shift(); } else { u.x += dx / d * st; u.y += dy / d * st; }
+  return !p.length;
+}
+function toRect(u, r, dt) {
+  if ((!u.path || !u.path.length) && u.rp <= 0) { u.path = pathRect(u, r); u.rp = 0.4; }
+  follow(u, dt);
+}
+function acquire(u, r) {
+  let best = null, bd = r;
+  for (const e of G.units) if (e.owner !== u.owner) { const d = Math.hypot(e.x - u.x, e.y - u.y); if (d < bd) { bd = d; best = e; } }
+  if (best) return best;
+  for (const b of G.blds) if (b.owner !== u.owner) { const d = rdist(u, b); if (d < bd) { bd = d; best = b; } }
+  return best;
+}
+function hit(a, t, dmg, ranged) {
+  t.hp -= dmg; t.hitT = G.time;
+  if (ranged && !FAST) {
+    const fx = a.k === 'u' ? a.x : a.x + a.w / 2, fy = a.k === 'u' ? a.y : a.y + a.h / 2;
+    G.tracers.push({ x1: fx, y1: fy, x2: t.k === 'u' ? t.x : t.x + t.w / 2, y2: t.k === 'u' ? t.y : t.y + t.h / 2, t: 0.14 });
+  }
+  const tx = t.k === 'u' ? t.x : t.x + t.w / 2, ty = t.k === 'u' ? t.y : t.y + t.h / 2;
+  G.players[t.owner].alert = { x: tx, y: ty, t: G.time };
+  if (t.owner === 0 && t.k === 'b' && G.time - lastAlertSfx > 8) { lastAlertSfx = G.time; sfx.alert(); toast(`${BT[t.type].n}遭到攻击！`); pings.push({ x: tx, y: ty, t: 1.2, c: '#ff4d3a' }); }
+  if (t.hp <= 0) kill(t);
+}
+function updUnit(u, dt) {
+  const T = UT[u.type], combat = u.type !== 'wrk';
+  u.cd -= dt; u.rp -= dt; u.acq -= dt;
+  switch (u.st) {
+    case 'idle':
+      if (combat && u.acq <= 0) { u.acq = 0.3; const t = acquire(u, 5.5); if (t) { u.resume = { x: u.x, y: u.y, am: false }; u.st = 'attack'; u.tid = t.id; u.path = null; u.rp = 0; } }
+      break;
+    case 'move':
+      if (u.amove && combat && u.acq <= 0) {
+        u.acq = 0.3; const t = acquire(u, 4.5);
+        if (t) { u.resume = { x: u.dest.x, y: u.dest.y, am: true }; u.st = 'attack'; u.tid = t.id; u.path = null; u.rp = 0; break; }
+      }
+      if (!u.path) u.path = pathPoint(u, u.dest.x, u.dest.y);
+      if (follow(u, dt)) u.st = 'idle';
+      break;
+    case 'attack': {
+      const t = G.ents.get(u.tid);
+      if (!t || t.k === 'm' || t.owner === u.owner) {
+        const r = u.resume; u.tid = 0;
+        if (r) oMove(u, r.x, r.y, r.am); else { u.st = 'idle'; u.path = null; }
+        break;
+      }
+      const isU = t.k === 'u', d = isU ? Math.hypot(t.x - u.x, t.y - u.y) : rdist(u, t);
+      if (d <= T.rng + 0.15) {
+        u.path = null;
+        if (u.cd <= 0) { u.cd = T.cd; hit(u, t, T.dmg * (isU ? (COUNTER[u.type] === t.type ? 1.5 : 1) : (u.type === 'arc' ? 0.6 : 1)), T.rng > 1.5); }
+      } else {
+        if (u.rp <= 0 && (isU || !u.path || !u.path.length)) { u.path = isU ? pathPoint(u, t.x, t.y) : pathRect(u, t); u.rp = 0.4 + Math.random() * 0.15; }
+        follow(u, dt);
+      }
+      break;
+    }
+    case 'gather': {
+      const m = G.ents.get(u.mid);
+      if (!m || m.gold <= 0) { autoGather(u); break; }
+      if (rdist(u, m) <= 0.85) {
+        u.path = null; u.timer += dt;
+        if (u.timer >= 2) {
+          u.timer = 0; u.carry = Math.min(m.gold, Math.round(5 * G.players[u.owner].rate)); m.gold -= u.carry;
+          const d = nearestDrop(u); if (!d) { u.st = 'idle'; break; }
+          u.did = d.id; u.st = 'return'; u.rp = 0;
+        }
+      } else toRect(u, m, dt);
+      break;
+    }
+    case 'return': {
+      let d = G.ents.get(u.did);
+      if (!d) { d = nearestDrop(u); if (!d) { u.st = 'idle'; break; } u.did = d.id; u.path = null; }
+      if (rdist(u, d) <= 0.85) { G.players[u.owner].gold += u.carry; u.carry = 0; u.st = 'gather'; u.path = null; u.rp = 0; u.timer = 0; }
+      else toRect(u, d, dt);
+      break;
+    }
+    case 'build': {
+      const b = G.ents.get(u.bid);
+      if (!b || b.done) { autoGather(u); break; }
+      if (rdist(u, b) <= 0.85) {
+        const B = BT[b.type]; u.path = null;
+        b.prog += dt; b.hp = Math.min(B.hp, b.hp + B.hp * 0.9 * dt / B.build);
+        if (b.prog >= B.build) { b.done = true; if (b.owner === 0) { sfx.built(); toast(`${B.n}建成`); } }
+      } else toRect(u, b, dt);
+      break;
+    }
+  }
+}
+function updBld(b, dt) {
+  if (!b.done) return;
+  const T = BT[b.type];
+  if (b.queue.length) {
+    const q = b.queue[0]; q.t += dt;
+    if (q.t >= UT[q.type].train) {
+      b.queue.shift();
+      const s = spotNear(b), u = addUnit(b.owner, q.type, s[0] + 0.5, s[1] + 0.5);
+      if (q.type === 'wrk') autoGather(u);
+      if (b.owner === 0) sfx.ready();
+    }
+  }
+  if (T.dmg) {
+    b.cd -= dt;
+    if (b.cd <= 0) {
+      b.cd = 0.25; let best = null, bd = T.rng;
+      for (const e of G.units) if (e.owner !== b.owner) { const d = rdist(e, b); if (d < bd) { bd = d; best = e; } }
+      if (best) { b.cd = T.cd; hit(b, best, T.dmg, true); }
+    }
+  }
+}
+function separate() {
+  const us = G.units, W = G.W;
+  for (let i = 0; i < us.length; i++) for (let j = i + 1; j < us.length; j++) {
+    const a = us[i], b = us[j];
+    if (a.type === 'wrk' && b.type === 'wrk') continue;
+    let dx = b.x - a.x, dy = b.y - a.y; const d = Math.hypot(dx, dy);
+    if (d >= 0.62) continue;
+    if (d < 1e-4) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; } else { dx /= d; dy /= d; }
+    const push = (0.62 - d) / 2;
+    for (const [u, sgn] of [[a, -1], [b, 1]]) {
+      const nx = u.x + dx * push * sgn, ny = u.y + dy * push * sgn;
+      if (nx >= 0 && ny >= 0 && nx < W && ny < G.H && !G.block[(ny | 0) * W + (nx | 0)]) { u.x = nx; u.y = ny; }
+    }
+  }
+  for (const u of us) if (G.block[clampT(u.y, G.H) * W + clampT(u.x, W)]) { const [x, y] = nearestPassable(u.x, u.y); u.x = x + 0.5; u.y = y + 0.5; u.path = null; }
+}
+function step(dt) {
+  G.time += dt;
+  for (const u of G.units.slice()) if (G.ents.has(u.id)) updUnit(u, dt);
+  for (const b of G.blds.slice()) if (G.ents.has(b.id)) updBld(b, dt);
+  separate();
+  G.taxT -= dt;
+  if (G.taxT <= 0) { G.taxT = 3; for (const b of G.blds) if (b.type === 'hq') G.players[b.owner].gold += 2; }
+  G.aiT -= dt;
+  if (G.aiT <= 0) { G.aiT = 1; G.players.forEach((pl, p) => { if (pl.ai && !G.over) aiThink(p); }); }
+  for (let k = G.tracers.length - 1; k >= 0; k--) if ((G.tracers[k].t -= dt) <= 0) G.tracers.splice(k, 1);
+  for (let k = pings.length - 1; k >= 0; k--) if ((pings[k].t -= dt) <= 0) pings.splice(k, 1);
+}
+
+/* ---------- 电脑对手 ---------- */
+function findSite(type, c, r0, r1) {
+  const T = BT[type], cx = Math.round(c.x + c.w / 2 - T.w / 2), cy = Math.round(c.y + c.h / 2 - T.h / 2);
+  for (let r = r0; r <= r1; r++) {
+    const cand = [];
+    for (let y = cy - r; y <= cy + r; y++) for (let x = cx - r; x <= cx + r; x++) if (Math.max(Math.abs(x - cx), Math.abs(y - cy)) === r) cand.push([x, y]);
+    cand.sort(() => Math.random() - 0.5);
+    for (const [x, y] of cand) {
+      let ok = true;
+      for (let yy = y - 1; yy <= y + T.h && ok; yy++) for (let xx = x - 1; xx <= x + T.w; xx++) if (xx < 0 || yy < 0 || xx >= G.W || yy >= G.H || G.block[yy * G.W + xx]) { ok = false; break; }
+      if (ok) return [x, y];
+    }
+  }
+  return null;
+}
+function aiThink(p) {
+  const pl = G.players[p], A = pl.ai, D = A.cfg;
+  const hq = G.blds.find(b => b.owner === p && b.type === 'hq'); if (!hq) return;
+  const my = G.units.filter(u => u.owner === p), wk = my.filter(u => u.type === 'wrk'), army = my.filter(u => u.type !== 'wrk');
+  const blds = G.blds.filter(b => b.owner === p), bars = blds.filter(b => b.type === 'bar');
+  const pending = t => blds.some(b => b.type === t && !b.done);
+  for (const w of wk) if (w.st === 'idle') autoGather(w);
+  for (const b of blds) if (!b.done && !wk.some(w => w.st === 'build' && w.bid === b.id)) {
+    const w = wk.filter(w => w.st !== 'build').sort((a, c) => rdist(a, b) - rdist(c, b))[0];
+    if (w) oBuild(w, b);
+  }
+  if (wk.length + hq.queue.length < D.workers && hq.queue.length < 2) train(p, hq, 'wrk');
+  const build = (type, around, r0, r1) => {
+    if (pl.gold < BT[type].cost) return;
+    const s = findSite(type, around || hq, r0 || 2, r1 || 9); if (!s) return;
+    const w = wk.filter(w => w.st !== 'build').sort((a, b) => Math.hypot(a.x - s[0], a.y - s[1]) - Math.hypot(b.x - s[0], b.y - s[1]))[0];
+    if (w) oBuild(w, place(p, type, s[0], s[1]));
+  };
+  const cap = popCap(p), used = popUsed(p);
+  const mine = nearestMine(hq.x + 1, hq.y + 1, 99);
+  if (cap - used <= 2 && cap < POPMAX && !pending('hse')) build('hse');
+  else if (!bars.length) { if (!pending('bar')) build('bar', hq, 3, 9); }
+  else if (mine && !pending('dep') && !blds.some(b => (b.type === 'hq' || b.type === 'dep') && rdist({ x: mine.x + 0.5, y: mine.y + 0.5 }, b) < 6)) build('dep', mine, 2, 4);
+  else if (bars.length < D.bars && G.time > bars.length * 150 && pl.gold >= 220 && !pending('bar')) build('bar', hq, 3, 9);
+  else if (blds.filter(b => b.type === 'twr').length < D.towers && G.time > 160 && pl.gold >= 200 && !pending('twr')) build('twr', hq, 2, 5);
+  if (bars.length || G.time > 400) for (const b of bars) if (b.done && !b.queue.length) {
+    const foe = G.units.filter(u => u.owner !== p && u.type !== 'wrk'), cnt = { inf: 0, arc: 0, cav: 0 };
+    for (const u of foe) cnt[u.type]++;
+    const top = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0];
+    let type = foe.length && Math.random() < 0.55 ? { inf: 'arc', arc: 'cav', cav: 'inf' }[top] : ['inf', 'inf', 'inf', 'inf', 'arc', 'arc', 'arc', 'cav', 'cav'][(Math.random() * 9) | 0];
+    train(p, b, type);
+  }
+  if (pl.alert && G.time - pl.alert.t < 2 && Math.hypot(pl.alert.x - hq.x, pl.alert.y - hq.y) < 12) {
+    const free = army.filter(u => u.st === 'idle' || (u.st === 'move' && !A.attacking));
+    if (free.length) groupMove(free, pl.alert.x, pl.alert.y, true);
+  }
+  const dry = !G.mines.some(m => m.gold > 0);
+  if (!A.attacking && G.time > D.first && army.length >= (dry ? 1 : Math.min(18, D.wave0 + D.grow * A.waves))) { A.attacking = true; A.waves++; }
+  if (A.attacking) {
+    if (army.length < 3 && !dry) { A.attacking = false; groupMove(army, hq.x + 1, hq.y + 3, false); }
+    else {
+      const idle = army.filter(u => u.st === 'idle');
+      if (idle.length) {
+        const cx = idle.reduce((s, u) => s + u.x, 0) / idle.length, cy = idle.reduce((s, u) => s + u.y, 0) / idle.length;
+        let best = null, bd = 1e9;
+        for (const b of G.blds) if (b.owner !== p) { const d = Math.hypot(b.x - cx, b.y - cy); if (d < bd) { bd = d; best = b; } }
+        if (best) groupMove(idle, best.x + best.w / 2, best.y + best.h / 2, true);
+      }
+    }
+  }
+}
+
+/* ---------- 绘制 ---------- */
+function resize() {
+  const f = $('field'), w = f.clientWidth, h = f.clientHeight, dpr = window.devicePixelRatio || 1;
+  if (!w || !h) return;
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  if (!G) return;
+  ts = Math.min(w / G.W, h / G.H); ox = (w - ts * G.W) / 2; oy = (h - ts * G.H) / 2;
+  terrDirty = true;
+}
+function tri(c, x, y, w, h) { c.beginPath(); c.moveTo(x, y - h); c.lineTo(x + w, y); c.lineTo(x - w, y); c.closePath(); c.fill(); }
+function drawTerrain() {
+  const dpr = window.devicePixelRatio || 1;
+  tcv.width = cv.width; tcv.height = cv.height;
+  const c = tcv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.fillStyle = '#0c1616'; c.fillRect(0, 0, cv.width, cv.height);
+  const s = ts;
+  for (let y = 0; y < G.H; y++) for (let x = 0; x < G.W; x++) {
+    const t = G.terr[y * G.W + x], px = ox + x * s, py = oy + y * s, v = ((x * 73 + y * 151) % 7) / 7;
+    c.fillStyle = t === 2 ? '#2e5f86' : t === 1 ? '#557a4c' : t === 3 ? '#6d7462' : `hsl(${96 + v * 8} 24% ${43 + v * 4}%)`;
+    c.fillRect(px, py, s + 0.5, s + 0.5);
+    const cx = px + s / 2, cy = py + s / 2;
+    if (t === 1) { c.fillStyle = '#254a2e'; tri(c, cx - s * .22, cy + s * .38, s * .2, s * .5); tri(c, cx + s * .22, cy + s * .42, s * .2, s * .5); tri(c, cx, cy + s * .16, s * .24, s * .6); }
+    else if (t === 3) { c.fillStyle = '#55524a'; tri(c, cx - s * .16, cy + s * .4, s * .32, s * .6); c.fillStyle = '#9a968a'; tri(c, cx + s * .16, cy + s * .4, s * .3, s * .78); }
+    else if (t === 2) { c.strokeStyle = 'rgba(190,225,255,.35)'; c.lineWidth = Math.max(1, s * .05); c.beginPath(); c.moveTo(cx - s * .3, cy); c.quadraticCurveTo(cx - s * .15, cy - s * .12, cx, cy); c.quadraticCurveTo(cx + s * .15, cy + s * .12, cx + s * .3, cy); c.stroke(); }
+  }
+  terrDirty = false;
+}
+const FONT = '"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif';
+function hpBar(x, y, w, k) {
+  const h = Math.max(2.5, ts * .12);
+  ctx.fillStyle = '#0c1616'; ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+  ctx.fillStyle = k > .5 ? '#7fd66b' : k > .25 ? '#f0c14b' : '#ef6a55'; ctx.fillRect(x, y, w * k, h);
+}
+function draw() {
+  if (terrDirty) drawTerrain();
+  const dpr = window.devicePixelRatio || 1, s = ts;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(tcv, 0, 0);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+  const X = x => ox + x * s, Y = y => oy + y * s;
+  for (const m of G.mines) {
+    const cx = X(m.x + .5), cy = Y(m.y + .5), k = m.gold / m.max;
+    ctx.fillStyle = '#4a4436'; ctx.beginPath(); ctx.arc(cx, cy, s * .46, 0, 7); ctx.fill();
+    ctx.fillStyle = m.gold > 0 ? '#f2cf62' : '#77746a';
+    for (const [dx, dy, r] of [[-.16, .1, .2], [.16, .12, .18], [0, -.14, .2]]) { if (k < .34 && dx > 0) continue; if (k < .67 && dy < 0 && k > 0) continue; ctx.beginPath(); ctx.moveTo(cx + s * dx, cy + s * (dy - r)); ctx.lineTo(cx + s * (dx + r), cy + s * dy); ctx.lineTo(cx + s * dx, cy + s * (dy + r)); ctx.lineTo(cx + s * (dx - r), cy + s * dy); ctx.closePath(); ctx.fill(); }
+  }
+  for (const b of G.blds) {
+    const T = BT[b.type], x = X(b.x), y = Y(b.y), w = b.w * s, h = b.h * s, pad = s * .08;
+    ctx.globalAlpha = b.done ? 1 : 0.55;
+    ctx.fillStyle = G.time - b.hitT < 0.12 ? '#fff' : COLORS[b.owner];
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x + pad, y + pad, w - pad * 2, h - pad * 2, s * .16) : ctx.rect(x + pad, y + pad, w - pad * 2, h - pad * 2); ctx.fill();
+    ctx.lineWidth = Math.max(1.5, s * .08); ctx.strokeStyle = '#0c1616'; ctx.stroke();
+    ctx.fillStyle = '#f3ead0'; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x + w * .2, y + h * .2, w * .6, h * .6, s * .1) : ctx.rect(x + w * .2, y + h * .2, w * .6, h * .6); ctx.fill();
+    ctx.fillStyle = '#0c1616'; ctx.font = `700 ${Math.max(9, s * .46 * Math.min(b.w, 1.6))}px ${FONT}`; ctx.fillText(T.ch, x + w / 2, y + h / 2 + 1);
+    ctx.globalAlpha = 1;
+    if (selB === b.id) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, w - 2, h - 2); }
+    if (!b.done) hpBar(x + w * .1, y + h - s * .22, w * .8, b.prog / T.build);
+    else if (b.hp < T.hp) hpBar(x + w * .1, y - s * .05, w * .8, b.hp / T.hp);
+    if (b.queue.length) { ctx.fillStyle = '#0c1616'; ctx.fillRect(x + w * .1 - 1, y + h - s * .2 - 1, w * .8 + 2, Math.max(2.5, s * .12) + 2); ctx.fillStyle = '#e0b548'; ctx.fillRect(x + w * .1, y + h - s * .2, w * .8 * b.queue[0].t / UT[b.queue[0].type].train, Math.max(2.5, s * .12)); }
+  }
+  const fs = Math.max(8, s * .42), r = s * .34;
+  for (const u of G.units) {
+    const cx = X(u.x), cy = Y(u.y), T = UT[u.type];
+    if (selU.has(u.id)) { ctx.beginPath(); ctx.arc(cx, cy, r + Math.max(2, s * .1), 0, 7); ctx.strokeStyle = '#fff'; ctx.lineWidth = Math.max(1.5, s * .07); ctx.stroke(); }
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7);
+    ctx.fillStyle = G.time - u.hitT < 0.1 ? '#fff' : COLORS[u.owner]; ctx.fill();
+    ctx.lineWidth = Math.max(1, s * .06); ctx.strokeStyle = u.type === 'wrk' ? '#f3ead0' : '#0c1616'; ctx.stroke();
+    ctx.fillStyle = '#0c1616'; ctx.font = `700 ${fs}px ${FONT}`; ctx.fillText(T.ch, cx, cy + fs * .05);
+    if (u.carry) { ctx.beginPath(); ctx.arc(cx + r * .8, cy - r * .8, Math.max(2, s * .11), 0, 7); ctx.fillStyle = '#f2cf62'; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = '#0c1616'; ctx.stroke(); }
+    if (u.hp < T.hp) hpBar(cx - r, cy + r + 1, r * 2, u.hp / T.hp);
+  }
+  ctx.strokeStyle = '#fff3c4'; ctx.lineWidth = Math.max(1, s * .05);
+  for (const t of G.tracers) { ctx.globalAlpha = Math.min(1, t.t / 0.1); ctx.beginPath(); ctx.moveTo(X(t.x1), Y(t.y1)); ctx.lineTo(X(t.x2), Y(t.y2)); ctx.stroke(); }
+  ctx.globalAlpha = 1;
+  for (const p of pings) { ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), s * (0.2 + p.t * 0.9), 0, 7); ctx.strokeStyle = p.c; ctx.globalAlpha = Math.min(1, p.t * 2); ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = 1; }
+  if (placing && hoverW) {
+    const T = BT[placing], [x, y] = placeAt(placing, hoverW.x, hoverW.y), ok = canPlace(placing, x, y);
+    ctx.fillStyle = ok ? 'rgba(120,230,140,.45)' : 'rgba(240,90,70,.5)'; ctx.fillRect(X(x), Y(y), T.w * s, T.h * s);
+    if (T.rng) { ctx.beginPath(); ctx.arc(X(x + T.w / 2), Y(y + T.h / 2), T.rng * s, 0, 7); ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.setLineDash([4, 4]); ctx.stroke(); ctx.setLineDash([]); }
+  }
+  if (box) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.setLineDash([5, 4]); ctx.strokeRect(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0); ctx.setLineDash([]); ctx.fillStyle = 'rgba(255,255,255,.08)'; ctx.fillRect(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0); }
+}
+
+/* ---------- 界面 ---------- */
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.hidden = false; toastT = performance.now() + 1800; }
+function showEnd() {
+  if (FAST) return;
+  $('endOv').hidden = false;
+  $('endCard').className = 'card ' + G.over;
+  $('endTitle').textContent = G.over === 'win' ? '大获全胜' : '都城陷落';
+  const m = (G.time / 60) | 0, sec = (G.time % 60) | 0;
+  $('endText').textContent = G.over === 'win' ? `你用 ${m} 分 ${sec} 秒攻破了敌方都城。` : `你坚守了 ${m} 分 ${sec} 秒。`;
+}
+const mine = () => [...selU].map(id => G.ents.get(id)).filter(Boolean);
+function hud() {
+  const pl = G.players[0];
+  $('sGold').textContent = pl.gold;
+  $('sPop').textContent = popUsed(0) + '/' + popCap(0);
+  $('sTime').textContent = ((G.time / 60) | 0) + ':' + String((G.time % 60) | 0).padStart(2, '0');
+  $('pause').textContent = paused ? '继续' : '暂停';
+  $('mute').textContent = muted ? '音效：关' : '音效：开';
+  if (!$('toast').hidden && performance.now() > toastT) $('toast').hidden = true;
+  const us = mine(), b = G.ents.get(selB), army = G.units.filter(u => u.owner === 0 && u.type !== 'wrk').length, idle = G.units.filter(u => u.owner === 0 && u.type === 'wrk' && u.st === 'idle').length;
+  const afford = [50, 60, 75, 90, 110, 120, 150].map(c => pl.gold >= c ? 1 : 0).join('');
+  const sig = [placing, us.map(u => u.type).sort().join(), b ? b.id + b.type + b.done + b.queue.map(q => q.type).join() : '', afford, army, idle].join('|');
+  if (sig === barSig) return;
+  barSig = sig;
+  let desc = '', btns = [];
+  const btn = (act, label, cost, key) => `<button type="button" data-act="${act}" ${cost > pl.gold ? 'disabled' : ''}>${key ? `<kbd>${key}</kbd>` : ''}${label}${cost ? `<em>${cost}</em>` : ''}</button>`;
+  if (placing) { desc = `<b>建造${BT[placing].n}</b>：在地图上点一个空位。${BT[placing].tip}。`; btns.push(btn('cancel', '取消', 0, 'Esc')); }
+  else if (us.length) {
+    const cnt = {}; for (const u of us) cnt[u.type] = (cnt[u.type] || 0) + 1;
+    desc = '<b>' + Object.keys(cnt).map(k => `${UT[k].n} ×${cnt[k]}`).join('，') + '</b>　点地面移动，点敌人进攻' + (cnt.wrk ? '，点金矿采集' : '') + '。';
+    if (cnt.wrk) ['hse', 'bar', 'twr', 'dep'].forEach((t, k) => btns.push(btn('build:' + t, '建' + BT[t].n, BT[t].cost, k + 1)));
+    btns.push(btn('cancel', '取消选择', 0, 'Esc'));
+  } else if (b) {
+    const T = BT[b.type];
+    desc = `<b>${T.n}</b>　${b.done ? T.tip + '。' : '建造中，选中民夫再点它可以帮忙。'}` + (b.queue.length ? `训练队列：${b.queue.map(q => UT[q.type].n).join('、')}。` : '');
+    if (b.done && b.type === 'hq') btns.push(btn('train:wrk', '训练民夫', UT.wrk.cost, 1));
+    if (b.done && b.type === 'bar') ['inf', 'arc', 'cav'].forEach((t, k) => btns.push(btn('train:' + t, '训练' + UT[t].n, UT[t].cost, k + 1)));
+    btns.push(btn('cancel', '取消选择', 0, 'Esc'));
+  } else desc = '点选或拖框选中单位。选中民夫可以建造，选中都城或兵营可以训练。';
+  $('desc').innerHTML = desc;
+  $('btns').innerHTML = btns.join('') + `<span class="quick"><button type="button" data-act="army" ${army ? '' : 'disabled'}><kbd>A</kbd>全军 ${army}</button><button type="button" data-act="idle" ${idle ? '' : 'disabled'}><kbd>F</kbd>闲置民夫 ${idle}</button></span>`;
+}
+function act(a) {
+  if (!G.running || paused) return;
+  const [k, v] = a.split(':');
+  if (k === 'cancel') { if (placing) placing = null; else { selU.clear(); selB = 0; } }
+  else if (k === 'build') { if (G.players[0].gold < BT[v].cost) { toast('金子不够'); sfx.err(); } else placing = v; }
+  else if (k === 'train') { const b = G.ents.get(selB); if (b) { const e = train(0, b, v); if (e) { toast(e); sfx.err(); } else sfx.pick(); } }
+  else if (k === 'army') { selB = 0; placing = null; selU = new Set(G.units.filter(u => u.owner === 0 && u.type !== 'wrk').map(u => u.id)); sfx.pick(); }
+  else if (k === 'idle') { const w = G.units.find(u => u.owner === 0 && u.type === 'wrk' && u.st === 'idle'); if (w) { selB = 0; placing = null; selU = new Set([w.id]); pings.push({ x: w.x, y: w.y, t: 0.8, c: '#fff' }); sfx.pick(); } }
+  barSig = '';
+}
+
+/* ---------- 输入 ---------- */
+const toW = e => { const r = cv.getBoundingClientRect(); return { sx: e.clientX - r.left, sy: e.clientY - r.top, x: (e.clientX - r.left - ox) / ts, y: (e.clientY - r.top - oy) / ts }; };
+const placeAt = (type, x, y) => [Math.floor(x - BT[type].w / 2 + 0.5), Math.floor(y - BT[type].h / 2 + 0.5)];
+function pick(x, y, slack) {
+  let best = null, bd = slack;
+  for (const u of G.units) { const d = Math.hypot(u.x - x, u.y - y); if (d < bd) { bd = d; best = u; } }
+  if (best) return best;
+  for (const r of G.blds.concat(G.mines)) if (x >= r.x - 0.1 && x <= r.x + r.w + 0.1 && y >= r.y - 0.1 && y <= r.y + r.h + 0.1) return r;
+  return null;
+}
+let down = null, lastTap = { t: 0, type: '' };
+function tap(w, right, coarse) {
+  if (placing) {
+    if (right) { placing = null; return; }
+    const [x, y] = placeAt(placing, w.x, w.y);
+    if (!canPlace(placing, x, y)) { toast('这里不能建造'); sfx.err(); return; }
+    if (G.players[0].gold < BT[placing].cost) { toast('金子不够'); sfx.err(); placing = null; return; }
+    const b = place(0, placing, x, y);
+    for (const u of mine()) if (u.type === 'wrk') oBuild(u, b);
+    placing = null; sfx.order(); return;
+  }
+  const e = pick(w.x, w.y, coarse ? 0.9 : 0.6), us = mine();
+  if (!right && e && e.k === 'u' && e.owner === 0) {
+    const now = performance.now();
+    if (now - lastTap.t < 350 && lastTap.type === e.type) selU = new Set(G.units.filter(u => u.owner === 0 && u.type === e.type).map(u => u.id));
+    else selU = new Set([e.id]);
+    lastTap = { t: now, type: e.type }; selB = 0; sfx.pick(); return;
+  }
+  if (!right && e && e.k === 'b' && e.owner === 0 && !(us.some(u => u.type === 'wrk') && !e.done)) { selU.clear(); selB = e.id; sfx.pick(); return; }
+  if (!us.length) return;
+  if (e && e.k !== 'm' && e.owner !== 0) { for (const u of us) oAttack(u, e); pings.push({ x: w.x, y: w.y, t: 0.5, c: '#ff4d3a' }); }
+  else if (e && e.k === 'm') {
+    if (e.gold <= 0) toast('这座金矿已经采空');
+    for (const u of us) if (u.type === 'wrk') oGather(u, e);
+    const rest = us.filter(u => u.type !== 'wrk'); if (rest.length) groupMove(rest, w.x, w.y, true);
+    pings.push({ x: e.x + .5, y: e.y + .5, t: 0.5, c: '#f2cf62' });
+  } else if (e && e.k === 'b' && !e.done) { for (const u of us) if (u.type === 'wrk') oBuild(u, e); pings.push({ x: w.x, y: w.y, t: 0.5, c: '#7fd66b' }); }
+  else if (e && e.k === 'b' && (e.type === 'hq' || e.type === 'dep') && us.some(u => u.carry)) { for (const u of us) if (u.carry) { u.st = 'return'; u.did = e.id; u.path = null; u.rp = 0; if (!u.mid) u.mid = (nearestMine(u.x, u.y, 99) || {}).id || 0; } }
+  else { groupMove(us, w.x, w.y, true); pings.push({ x: w.x, y: w.y, t: 0.5, c: '#fff' }); }
+  sfx.order();
+}
+cv.addEventListener('pointerdown', e => {
+  if (!G.running || paused) return;
+  cv.setPointerCapture(e.pointerId);
+  down = { w: toW(e), right: e.button === 2, id: e.pointerId };
+});
+cv.addEventListener('pointermove', e => {
+  const w = toW(e); hoverW = w;
+  if (down && !down.right && !placing && (box || Math.hypot(w.sx - down.w.sx, w.sy - down.w.sy) > 10)) box = { x0: down.w.sx, y0: down.w.sy, x1: w.sx, y1: w.sy };
+});
+cv.addEventListener('pointerup', e => {
+  if (!down) return;
+  const w = toW(e), d = down; down = null;
+  if (!G.running || paused) { box = null; return; }
+  if (box) {
+    const x0 = (Math.min(box.x0, box.x1) - ox) / ts, x1 = (Math.max(box.x0, box.x1) - ox) / ts, y0 = (Math.min(box.y0, box.y1) - oy) / ts, y1 = (Math.max(box.y0, box.y1) - oy) / ts;
+    let got = G.units.filter(u => u.owner === 0 && u.x >= x0 && u.x <= x1 && u.y >= y0 && u.y <= y1);
+    if (got.some(u => u.type !== 'wrk')) got = got.filter(u => u.type !== 'wrk');
+    box = null;
+    if (got.length) { selU = new Set(got.map(u => u.id)); selB = 0; sfx.pick(); }
+    return;
+  }
+  tap(w, d.right, e.pointerType === 'touch');
+});
+cv.addEventListener('pointercancel', () => { down = null; box = null; });
+cv.addEventListener('pointerleave', () => { hoverW = null; });
+cv.addEventListener('contextmenu', e => e.preventDefault());
+$('btns').addEventListener('pointerdown', e => { const b = e.target.closest('[data-act]'); if (b && !b.disabled) { e.preventDefault(); act(b.dataset.act); } });
+$('btns').addEventListener('keydown', e => { if (e.key === 'Enter') { const b = e.target.closest('[data-act]'); if (b && !b.disabled) act(b.dataset.act); } });
+document.addEventListener('keydown', e => {
+  if (/^(SELECT|INPUT)$/.test(e.target.tagName) || !G.running) return;
+  const k = e.key.toLowerCase();
+  hud();
+  if (k === 'escape') act('cancel');
+  else if (k === 'a') act('army');
+  else if (k === 'f') act('idle');
+  else if (k === 'p' || k === ' ') { e.preventDefault(); togglePause(); }
+  else if (/^[1-4]$/.test(k)) { const b = $('btns').querySelectorAll('button[data-act^="build"],button[data-act^="train"]')[+k - 1]; if (b && !b.disabled) act(b.dataset.act); else if (b) { toast('金子不够'); sfx.err(); } }
+});
+function togglePause() { if (!G.running) return; paused = !paused; if (paused) toast('已暂停'); }
+$('pause').addEventListener('click', togglePause);
+$('mute').addEventListener('click', () => { muted = !muted; try { localStorage.setItem('jiling-mute', muted ? '1' : '0'); } catch (e) { /* 忽略 */ } if (!muted) sfx.ready(); });
+const portraitNow = () => { const f = $('field'); return f.clientHeight > f.clientWidth; };
+$('startBtn').addEventListener('click', () => { $('startOv').hidden = true; G.running = true; lastAlertSfx = -99; sfx.ready(); });
+$('diff').addEventListener('change', () => { newGame(+$('diff').value, portraitNow()); resize(); });
+$('againBtn').addEventListener('click', () => { $('endOv').hidden = true; $('startOv').hidden = false; newGame(+$('diff').value, portraitNow()); resize(); });
+new ResizeObserver(resize).observe($('field'));
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { terrDirty = true; });
+
+/* ---------- 主循环 ---------- */
+let last = performance.now(), acc = 0, hudT = 0;
+function frame(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (G.running && !paused) { acc += dt; while (acc >= 1 / 30) { step(1 / 30); acc -= 1 / 30; if (!G.running) break; } }
+  if (now - hudT > 120) { hudT = now; hud(); }
+  draw();
+  requestAnimationFrame(frame);
+}
+newGame(1, portraitNow()); resize();
+requestAnimationFrame(frame);
+
+// 自动对战入口，仅用于测试平衡：让电脑同时指挥双方（或让蓝方挂机）
+window.__jiling = {
+  get game() { return G; },
+  auto(diff, seconds, bothAI) {
+    FAST = true; newGame(diff, false);
+    if (bothAI) G.players[0].ai = { waves: 0, attacking: false, cfg: DIFFS[1] };
+    G.running = true;
+    const marks = {};
+    while (G.running && G.time < seconds) {
+      step(1 / 30);
+      if (!marks.firstWave && G.players[1].ai.attacking) marks.firstWave = Math.round(G.time);
+    }
+    FAST = false;
+    const res = { over: G.over, time: Math.round(G.time), ...marks, gold: G.players.map(p => p.gold), units: [0, 1].map(p => G.units.filter(u => u.owner === p).length), blds: [0, 1].map(p => G.blds.filter(b => b.owner === p).map(b => b.type).join('')) };
+    G.running = false; resize();
+    return res;
+  },
+};
+})();
+</script>
+</body>
+</html>
