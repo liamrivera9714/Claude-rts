@@ -69,13 +69,26 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: 
 .bar { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 6px; min-height: 96px; }
 .bar .desc { color: var(--muted); font-size: 13px; min-width: 0; }
 .bar .desc b { color: var(--fg); font-weight: 700; }
+.queue { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.queue .qlabel { color: var(--muted); font-size: 12px; }
+.slot { position: relative; width: 36px; height: 36px; padding: 0; border-radius: 5px; border: 1px solid var(--line); background: var(--surface-2); display: inline-flex; align-items: center; justify-content: center; overflow: hidden; }
+.slot.empty { border-style: dashed; background: transparent; }
+.slot b { position: relative; font-size: 16px; }
+.slot.cur { border-color: var(--brass); }
+.slot i { position: absolute; left: 0; bottom: 0; top: 0; width: 0; background: rgba(224, 181, 72, .45); }
+.slot:hover:not(.empty)::after { content: "×"; position: absolute; right: 2px; top: -3px; color: var(--danger); font-size: 14px; }
+.qinfo { flex: 1; min-width: 150px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.qinfo b { color: var(--fg); }
+.qbar { height: 6px; border-radius: 3px; background: var(--surface-2); margin-top: 3px; overflow: hidden; max-width: 260px; }
+.qbar span { display: block; height: 100%; width: 0; background: var(--brass); }
+.stats .full { color: var(--danger); }
 .btns { display: flex; flex-wrap: wrap; gap: 6px; }
 .btns button { line-height: 1.25; padding: 5px 9px; text-align: left; }
 .btns button small { color: var(--muted); font-size: 11px; margin-left: 6px; }
 .btns button em { font-style: normal; color: var(--brass); margin-left: 6px; font-variant-numeric: tabular-nums; }
 .btns button kbd { font: inherit; font-size: 11px; color: var(--muted); margin-right: 5px; }
 .btns .quick { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
-@media (max-width: 600px) { h1 { font-size: 20px; } .btns button kbd { display: none; } }
+@media (max-width: 600px) { h1 { font-size: 20px; } .btns button kbd, .btns .role { display: none; } .btns button { padding: 5px 7px; } }
 </style>
 
 <div class="app">
@@ -106,7 +119,8 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: 
         <p>采金、筑城、练兵，抢在敌军之前攻破对方都城。</p>
         <ul>
           <li>点选或拖框选中单位，再点地面移动、点敌人进攻、点金矿采集。电脑上右键同样可以下令。</li>
-          <li>选中民夫可以建造；选中都城训练民夫，选中兵营训练军队。</li>
+          <li>选中民夫可以建造；选中都城训练民夫，选中兵营训练军队。队列和进度显示在军令栏，点格子可取消。</li>
+          <li>人口占用：民夫、步兵、弓兵各 1，骑兵 2，投石车 3。上限 50。</li>
           <li>民居提高人口上限，箭塔自动射击，驿站让民夫就近交金，锻坊研究全军的攻防。</li>
           <li>战争迷雾：只能看见己方单位和建筑附近的敌人。投石车专拆建筑。</li>
           <li>选中都城或兵营后点地面，可以设定新兵的集结点。</li>
@@ -133,6 +147,7 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: 
 
   <div class="bar" id="bar">
     <div class="desc" id="desc"></div>
+    <div class="queue" id="queue" hidden></div>
     <div class="btns" id="btns"></div>
   </div>
 </div>
@@ -142,26 +157,26 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: 
 (() => {
 'use strict';
 const UT = {
-  wrk: { n: '民夫', ch: '民', cost: 50,  hp: 40,  dmg: 3,  cd: 1.0, rng: 0.75, spd: 2.3, train: 9 },
-  inf: { n: '步兵', ch: '步', cost: 60,  hp: 100, dmg: 10, cd: 1.0, rng: 0.75, spd: 2.1, train: 10, tag: '克骑兵' },
-  arc: { n: '弓兵', ch: '弓', cost: 75,  hp: 55,  dmg: 9,  cd: 1.2, rng: 4.0,  spd: 2.1, train: 11, tag: '远程 · 克步兵' },
-  cav: { n: '骑兵', ch: '骑', cost: 110, hp: 130, dmg: 13, cd: 1.1, rng: 0.8,  spd: 3.3, train: 13, tag: '快 · 克弓兵' },
-  cat: { n: '投石车', ch: '砲', cost: 140, hp: 90, dmg: 10, bdmg: 45, cd: 3.0, rng: 6.5, spd: 1.4, train: 16, tag: '攻城' },
+  wrk: { n: '民夫', ch: '民', cost: 50,  hp: 40,  dmg: 3,  cd: 1.0, rng: 0.75, spd: 2.3, train: 9, pop: 1 },
+  inf: { n: '步兵', ch: '步', cost: 60,  hp: 100, dmg: 10, cd: 1.0, rng: 0.75, spd: 2.1, train: 10, pop: 1, tag: '克骑兵' },
+  arc: { n: '弓兵', ch: '弓', cost: 75,  hp: 55,  dmg: 9,  cd: 1.2, rng: 4.0,  spd: 2.1, train: 11, pop: 1, tag: '远程 · 克步兵' },
+  cav: { n: '骑兵', ch: '骑', cost: 110, hp: 130, dmg: 13, cd: 1.1, rng: 0.8,  spd: 3.3, train: 13, pop: 2, tag: '快 · 克弓兵' },
+  cat: { n: '投石车', ch: '砲', cost: 140, hp: 90, dmg: 10, bdmg: 45, cd: 3.0, rng: 6.5, spd: 1.4, train: 16, pop: 3, tag: '攻城' },
 };
 const BT = {
   hq:  { n: '都城', ch: '都', w: 2, h: 2, hp: 2500, cost: 0,   build: 1,  pop: 8, dmg: 7, rng: 4.5, cd: 1, tip: '训练民夫，接收金子，每 3 秒自带 2 金税收。被毁即落败' },
   hse: { n: '民居', ch: '居', w: 1, h: 1, hp: 300,  cost: 60,  build: 12, pop: 6, tip: '人口上限 +6' },
-  bar: { n: '兵营', ch: '营', w: 2, h: 2, hp: 650,  cost: 150, build: 22, tip: '训练步兵、弓兵、骑兵' },
+  bar: { n: '兵营', ch: '营', w: 2, h: 2, hp: 650,  cost: 150, build: 22, tip: '训练步兵、弓兵、骑兵、投石车' },
   twr: { n: '箭塔', ch: '塔', w: 1, h: 1, hp: 420,  cost: 120, build: 18, dmg: 12, rng: 5, cd: 1, tip: '自动射击靠近的敌军' },
   dep: { n: '驿站', ch: '驿', w: 1, h: 1, hp: 350,  cost: 90,  build: 12, tip: '民夫可以就近交金' },
   smi: { n: '锻坊', ch: '锻', w: 1, h: 1, hp: 400,  cost: 130, build: 16, tip: '研究锻刃和铸甲，强化全军' },
 };
 const UP = {
-  atk: { n: '锻刃', tip: '全军伤害 +12%', cost: [120, 200, 280], time: [20, 30, 40] },
-  def: { n: '铸甲', tip: '全军受伤 -10%', cost: [120, 200, 280], time: [20, 30, 40] },
+  atk: { n: '锻刃', ch: '刃', tip: '全军伤害 +12%', cost: [120, 200, 280], time: [20, 30, 40] },
+  def: { n: '铸甲', ch: '甲', tip: '全军受伤 -10%', cost: [120, 200, 280], time: [20, 30, 40] },
 };
 const COUNTER = { inf: 'cav', cav: 'arc', arc: 'inf' };
-const POPMAX = 40;
+const POPMAX = 50;
 const COLORS = ['#4f9dff', '#e8604a'];
 const DIFFS = [
   { rate: 0.7, workers: 6,  bars: 1, towers: 0, smi: 0, first: 300, wave0: 4, grow: 2 },
@@ -353,7 +368,7 @@ function groupMove(units, x, y, amove) {
   });
 }
 const popCap = p => Math.min(POPMAX, G.blds.reduce((s, b) => s + (b.owner === p && b.done ? BT[b.type].pop || 0 : 0), 0));
-const popUsed = p => G.units.reduce((s, u) => s + (u.owner === p ? 1 : 0), 0) + G.blds.reduce((s, b) => s + (b.owner === p ? b.queue.length : 0), 0);
+const popUsed = p => G.units.reduce((s, u) => s + (u.owner === p ? UT[u.type].pop : 0), 0) + G.blds.reduce((s, b) => s + (b.owner === p ? b.queue.reduce((n, q) => n + (UT[q.type] ? UT[q.type].pop : 0), 0) : 0), 0);
 function train(p, b, type) {
   const pl = G.players[p];
   if (!b.done || b.queue.length >= 5) return '队列已满';
@@ -361,11 +376,11 @@ function train(p, b, type) {
     const lv = pl.up[type] + G.blds.reduce((n, x) => n + (x.owner === p ? x.queue.filter(q => q.type === type).length : 0), 0);
     if (lv >= 3) return '已经研究到顶';
     if (pl.gold < UP[type].cost[lv]) return '金子不够';
-    pl.gold -= UP[type].cost[lv]; b.queue.push({ type, t: 0, need: UP[type].time[lv] }); return '';
+    pl.gold -= UP[type].cost[lv]; b.queue.push({ type, t: 0, need: UP[type].time[lv], cost: UP[type].cost[lv] }); return '';
   }
   if (pl.gold < UT[type].cost) return '金子不够';
-  if (popUsed(p) >= popCap(p)) return popCap(p) >= POPMAX ? '人口已到上限' : '人口不足，先造民居';
-  pl.gold -= UT[type].cost; b.queue.push({ type, t: 0, need: UT[type].train }); return '';
+  if (popUsed(p) + UT[type].pop > popCap(p)) return popCap(p) >= POPMAX ? '人口已到上限' : `人口不足（${UT[type].n}占 ${UT[type].pop}），先造民居`;
+  pl.gold -= UT[type].cost; b.queue.push({ type, t: 0, need: UT[type].train, cost: UT[type].cost }); return '';
 }
 function canPlace(type, x, y) {
   const T = BT[type];
@@ -574,7 +589,7 @@ function aiThink(p) {
   };
   const cap = popCap(p), used = popUsed(p);
   const mine = nearestMine(hq.x + 1, hq.y + 1, 99);
-  if (cap - used <= 2 && cap < POPMAX && !pending('hse')) build('hse');
+  if (cap - used <= 3 && cap < POPMAX && !pending('hse')) build('hse');
   else if (!bars.length) { if (!pending('bar')) build('bar', hq, 3, 9); }
   else if (mine && !pending('dep') && !blds.some(b => (b.type === 'hq' || b.type === 'dep') && rdist({ x: mine.x + 0.5, y: mine.y + 0.5 }, b) < 6)) build('dep', mine, 2, 4);
   else if (bars.length < D.bars && G.time > bars.length * 150 && pl.gold >= 220 && !pending('bar')) build('bar', hq, 3, 9);
@@ -926,7 +941,7 @@ const mine = () => [...selU].map(id => G.ents.get(id)).filter(Boolean);
 function hud() {
   const pl = G.players[0];
   $('sGold').textContent = pl.gold;
-  $('sPop').textContent = popUsed(0) + '/' + popCap(0);
+  $('sPop').textContent = popUsed(0) + '/' + popCap(0); $('sPop').classList.toggle('full', popUsed(0) >= popCap(0));
   $('sTime').textContent = ((G.time / 60) | 0) + ':' + String((G.time % 60) | 0).padStart(2, '0');
   $('pause').textContent = paused ? '继续' : '暂停';
   $('mute').textContent = muted ? '音效：关' : '音效：开';
@@ -942,32 +957,50 @@ function hud() {
     else if (!G.blds.some(x => x.owner === 0 && x.type === 'smi') && G.time > 200) hint = '可以建一座锻坊，研究锻刃和铸甲来强化全军。';
   }
   const sig = [placing, us.map(u => u.type).sort().join(), b ? b.id + b.type + b.done + b.queue.map(q => q.type).join() : '', afford, army, idle, hint, pl.up.atk, pl.up.def].join('|');
-  if (sig === barSig) return;
+  if (sig === barSig) { queueTick(b); return; }
   barSig = sig;
   let desc = '', btns = [];
   const btn = (act, label, cost, key, tag) => `<button type="button" data-act="${act}" ${cost > pl.gold ? 'disabled' : ''}>${key ? `<kbd>${key}</kbd>` : ''}${label}${cost ? `<em>${cost}</em>` : ''}${tag ? `<small>${tag}</small>` : ''}</button>`;
   if (placing) { desc = `<b>建造${BT[placing].n}</b>：在地图上点一个空位。${BT[placing].tip}。`; btns.push(btn('cancel', '取消', 0, 'Esc')); }
   else if (us.length) {
     const cnt = {}; for (const u of us) cnt[u.type] = (cnt[u.type] || 0) + 1;
-    desc = '<b>' + Object.keys(cnt).map(k => `${UT[k].n} ×${cnt[k]}`).join('，') + '</b>　点地面移动，点敌人进攻' + (cnt.wrk ? '，点金矿采集' : '') + '。';
+    desc = '<b>' + Object.keys(cnt).map(k => `${UT[k].n} ×${cnt[k]}`).join('，') + `</b>　占 ${us.reduce((n, u) => n + UT[u.type].pop, 0)} 人口。点地面移动，点敌人进攻` + (cnt.wrk ? '，点金矿采集' : '') + '。';
     if (cnt.wrk) ['hse', 'bar', 'twr', 'dep', 'smi'].forEach((t, k) => btns.push(btn('build:' + t, '建' + BT[t].n, BT[t].cost, k + 1)));
     btns.push(btn('stop', '停止', 0, 'S')); btns.push(btn('cancel', '取消选择', 0, 'Esc'));
   } else if (b) {
     const T = BT[b.type];
-    desc = `<b>${T.n}</b>　${b.done ? T.tip + '。' : '建造中，选中民夫再点它可以帮忙。'}` + (b.queue.length ? `队列：${b.queue.map(q => (UT[q.type] || UP[q.type]).n).join('、')}。` : '');
-    if (b.done && b.type === 'hq') btns.push(btn('train:wrk', '训练民夫', UT.wrk.cost, 1));
-    if (b.done && b.type === 'bar') ['inf', 'arc', 'cav', 'cat'].forEach((t, k) => btns.push(btn('train:' + t, UT[t].n, UT[t].cost, k + 1, UT[t].tag)));
+    desc = `<b>${T.n}</b>　${b.done ? T.tip + '。' : '建造中，选中民夫再点它可以帮忙。'}`;
+    if (b.done && b.type === 'hq') btns.push(btn('train:wrk', '训练民夫', UT.wrk.cost, 1, '占 1 人口'));
+    if (b.done && b.type === 'bar') ['inf', 'arc', 'cav', 'cat'].forEach((t, k) => btns.push(btn('train:' + t, UT[t].n, UT[t].cost, k + 1, `<span class="role">${UT[t].tag} · </span>占 ${UT[t].pop} 人口`)));
     if (b.done && b.type === 'smi') ['atk', 'def'].forEach((t, k) => { const lv = pl.up[t]; btns.push(lv >= 3 ? `<button type="button" disabled>${UP[t].n} 已满级</button>` : btn('train:' + t, `${UP[t].n} ${lv + 1} 级`, UP[t].cost[lv], k + 1, UP[t].tip)); });
     if (b.done && (b.type === 'hq' || b.type === 'bar')) desc += '点地面可设定集结点。';
     btns.push(btn('cancel', '取消选择', 0, 'Esc'));
   } else desc = hint;
   $('desc').innerHTML = desc;
+  const hasQ = b && b.done && (b.type === 'hq' || b.type === 'bar' || b.type === 'smi') && !us.length && !placing;
+  $('queue').hidden = !hasQ;
+  if (hasQ) {
+    $('queue').innerHTML = `<span class="qlabel">${b.type === 'smi' ? '研究' : '训练'}队列</span>` + [0, 1, 2, 3, 4].map(i => {
+      const q = b.queue[i];
+      return q ? `<button type="button" class="slot${i ? '' : ' cur'}" data-act="unq:${i}" title="点击取消，退还 ${q.cost} 金" aria-label="取消${(UT[q.type] || UP[q.type]).n}">${i ? '' : '<i id="qfill"></i>'}<b>${(UT[q.type] || UP[q.type]).ch}</b></button>` : '<span class="slot empty"></span>';
+    }).join('') + '<div class="qinfo"><span id="qtext"></span><div class="qbar"><span id="qbarfill"></span></div></div>';
+  }
+  queueTick(b);
   $('btns').innerHTML = btns.join('') + `<span class="quick"><button type="button" data-act="army" ${army ? '' : 'disabled'}><kbd>A</kbd>全军 ${army}</button><button type="button" data-act="idle" ${idle ? '' : 'disabled'}><kbd>F</kbd>闲置民夫 ${idle}</button></span>`;
+}
+function queueTick(b) {
+  const el = $('qtext');
+  if (!el || $('queue').hidden || !b) return;
+  const q = b.queue[0], k = q ? Math.min(1, q.t / q.need) : 0;
+  $('qbarfill').style.width = k * 100 + '%';
+  if ($('qfill')) $('qfill').style.width = k * 100 + '%';
+  el.innerHTML = q ? `<b>${(UT[q.type] || UP[q.type]).n}</b> ${Math.round(k * 100)}% · 还需 ${Math.ceil(q.need - q.t)} 秒` + (b.queue.length > 1 ? ` · 排队 ${b.queue.length - 1}` : '') + ' · 点格子可取消' : '队列为空，点下方按钮开始。最多排 5 个。';
 }
 function act(a) {
   if (!G.running || paused) return;
   const [k, v] = a.split(':');
   if (k === 'cancel') { if (placing) placing = null; else { selU.clear(); selB = 0; } }
+  else if (k === 'unq') { const b = G.ents.get(selB), q = b && b.queue[+v]; if (q) { b.queue.splice(+v, 1); G.players[0].gold += q.cost; toast(`已取消${(UT[q.type] || UP[q.type]).n}，退还 ${q.cost} 金`); sfx.pick(); } }
   else if (k === 'stop') { for (const u of mine()) { u.st = 'idle'; u.path = null; u.tid = 0; u.resume = null; } }
   else if (k === 'build') { if (G.players[0].gold < BT[v].cost) { toast('金子不够'); sfx.err(); } else placing = v; }
   else if (k === 'train') { const b = G.ents.get(selB); if (b) { const e = train(0, b, v); if (e) { toast(e); sfx.err(); } else sfx.pick(); } }
@@ -1088,6 +1121,7 @@ const miniGo = e => { const r = mini.getBoundingClientRect(); cam.x = (e.clientX
 mini.addEventListener('pointerdown', e => { if (!renderer) return; mini.setPointerCapture(e.pointerId); miniGo(e); });
 mini.addEventListener('pointermove', e => { if (renderer && e.buttons) miniGo(e); });
 cv.addEventListener('contextmenu', e => e.preventDefault());
+$('queue').addEventListener('pointerdown', e => { const b = e.target.closest('[data-act]'); if (b) { e.preventDefault(); act(b.dataset.act); } });
 $('btns').addEventListener('pointerdown', e => { const b = e.target.closest('[data-act]'); if (b && !b.disabled) { e.preventDefault(); act(b.dataset.act); } });
 $('btns').addEventListener('keydown', e => { if (e.key === 'Enter') { const b = e.target.closest('[data-act]'); if (b && !b.disabled) act(b.dataset.act); } });
 document.addEventListener('keydown', e => {
